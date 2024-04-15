@@ -1,14 +1,11 @@
-import { AssertionFailureError, AsyncService, Defer, HashManager, marshalErrorLike } from 'civkit';
+import { AssertionFailureError, AsyncService, Defer } from 'civkit';
 import { container, singleton } from 'tsyringe';
 import type { Browser } from 'puppeteer';
-import { Logger } from '../shared/services/logger';
 import genericPool from 'generic-pool';
 import os from 'os';
 import fs from 'fs';
-import { Crawled } from '../db/crawled';
 import puppeteer from 'puppeteer-extra';
 import puppeteerStealth from 'puppeteer-extra-plugin-stealth';
-
 
 const READABILITY_JS = fs.readFileSync(require.resolve('@mozilla/readability/Readability.js'), 'utf-8');
 
@@ -31,7 +28,7 @@ export interface PageSnapshot {
     } | null;
     screenshot?: Buffer;
 }
-const md5Hasher = new HashManager('md5', 'hex');
+// const md5Hasher = new HashManager('md5', 'hex');
 
 puppeteer.use(puppeteerStealth());
 // const puppeteerUAOverride = require('puppeteer-extra-plugin-stealth/evasions/user-agent-override');
@@ -41,31 +38,32 @@ puppeteer.use(puppeteerStealth());
 
 @singleton()
 export class PuppeteerControl extends AsyncService {
-
     browser!: Browser;
-    logger = this.globalLogger.child({ service: this.constructor.name });
 
-    pagePool = genericPool.createPool({
-        create: async () => {
-            const page = await this.newPage();
-            return page;
+    pagePool = genericPool.createPool(
+        {
+            create: async () => {
+                const page = await this.newPage();
+                return page;
+            },
+            destroy: async (page) => {
+                await page.browserContext().close();
+            },
+            validate: async (page) => {
+                return page.browser().connected && !page.isClosed();
+            },
         },
-        destroy: async (page) => {
-            await page.browserContext().close();
-        },
-        validate: async (page) => {
-            return page.browser().connected && !page.isClosed();
+        {
+            max: Math.max(1 + Math.floor((os.freemem() / 1024) * 1024 * 1024), 16),
+            min: 1,
+            acquireTimeoutMillis: 60_000,
+            testOnBorrow: true,
+            testOnReturn: true,
+            autostart: false,
         }
-    }, {
-        max: Math.max(1 + Math.floor(os.freemem() / 1024 * 1024 * 1024), 16),
-        min: 1,
-        acquireTimeoutMillis: 60_000,
-        testOnBorrow: true,
-        testOnReturn: true,
-        autostart: false,
-    });
+    );
 
-    constructor(protected globalLogger: Logger) {
+    constructor() {
         super(...arguments);
     }
 
@@ -81,22 +79,24 @@ export class PuppeteerControl extends AsyncService {
                 this.browser.process()?.kill();
             }
         }
-        this.browser = await puppeteer.launch({
-            headless: true,
-            timeout: 10_000
-        }).catch((err) => {
-            this.logger.error(`Unknown firebase issue, just die fast.`, { err });
-            process.nextTick(() => {
-                this.emit('error', err);
-                // process.exit(1);
+        this.browser = await puppeteer
+            .launch({
+                headless: true,
+                timeout: 10_000,
+            })
+            .catch((err) => {
+                // this.logger.error(`Unknown firebase issue, just die fast.`, { err });
+                process.nextTick(() => {
+                    this.emit('error', err);
+                    // process.exit(1);
+                });
+                return Promise.reject(err);
             });
-            return Promise.reject(err);
-        });
         this.browser.once('disconnected', () => {
-            this.logger.warn(`Browser disconnected`);
+            // this.logger.warn(`Browser disconnected`);
             this.emit('crippled');
         });
-        this.logger.info(`Browser launched: ${this.browser.process()?.pid}`);
+        // this.logger.info(`Browser launched: ${this.browser.process()?.pid}`);
 
         this.emit('ready');
     }
@@ -112,11 +112,14 @@ export class PuppeteerControl extends AsyncService {
         // preparations.push(page.setUserAgent(`Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.0; +https://openai.com/gptbot)`));
         preparations.push(page.setBypassCSP(true));
         preparations.push(page.setViewport({ width: 1920, height: 1080 }));
-        preparations.push(page.exposeFunction('reportSnapshot', (snapshot: any) => {
-            page.emit('snapshot', snapshot);
-        }));
+        preparations.push(
+            page.exposeFunction('reportSnapshot', (snapshot: any) => {
+                page.emit('snapshot', snapshot);
+            })
+        );
         preparations.push(page.evaluateOnNewDocument(READABILITY_JS));
-        preparations.push(page.evaluateOnNewDocument(`
+        preparations.push(
+            page.evaluateOnNewDocument(`
 function giveSnapshot() {
     return {
         title: document.title,
@@ -126,35 +129,38 @@ function giveSnapshot() {
         parsed: new Readability(document.cloneNode(true)).parse(),
     };
 }
-`));
-        preparations.push(page.evaluateOnNewDocument(() => {
-            let aftershot: any;
-            const handlePageLoad = () => {
-                // @ts-expect-error
-                if (document.readyState !== 'complete' && document.readyState !== 'interactive') {
-                    return;
-                }
-                // @ts-expect-error
-                const parsed = giveSnapshot();
-                if (parsed) {
+`)
+        );
+        preparations.push(
+            page.evaluateOnNewDocument(() => {
+                let aftershot: any;
+                const handlePageLoad = () => {
                     // @ts-expect-error
-                    window.reportSnapshot(parsed);
-                } else {
-                    if (aftershot) {
-                        clearTimeout(aftershot);
+                    if (document.readyState !== 'complete' && document.readyState !== 'interactive') {
+                        return;
                     }
-                    aftershot = setTimeout(() => {
+                    // @ts-expect-error
+                    const parsed = giveSnapshot();
+                    if (parsed) {
                         // @ts-expect-error
-                        window.reportSnapshot(giveSnapshot());
-                    }, 500);
-                }
-            };
-            // setInterval(handlePageLoad, 1000);
-            // @ts-expect-error
-            document.addEventListener('readystatechange', handlePageLoad);
-            // @ts-expect-error
-            document.addEventListener('load', handlePageLoad);
-        }));
+                        window.reportSnapshot(parsed);
+                    } else {
+                        if (aftershot) {
+                            clearTimeout(aftershot);
+                        }
+                        aftershot = setTimeout(() => {
+                            // @ts-expect-error
+                            window.reportSnapshot(giveSnapshot());
+                        }, 500);
+                    }
+                };
+                // setInterval(handlePageLoad, 1000);
+                // @ts-expect-error
+                document.addEventListener('readystatechange', handlePageLoad);
+                // @ts-expect-error
+                document.addEventListener('load', handlePageLoad);
+            })
+        );
 
         await Promise.all(preparations);
 
@@ -167,35 +173,47 @@ function giveSnapshot() {
         const parsedUrl = new URL(url);
         // parsedUrl.search = '';
         parsedUrl.hash = '';
-        const normalizedUrl = parsedUrl.toString().toLowerCase();
-        const digest = md5Hasher.hash(normalizedUrl);
-        this.logger.info(`Scraping ${url}, normalized digest: ${digest}`, { url, digest });
+        // const normalizedUrl = parsedUrl.toString().toLowerCase();
+        // const digest = md5Hasher.hash(normalizedUrl);
+        // this.logger.info(`Scraping ${url}, normalized digest: ${digest}`, { url, digest });
 
         let snapshot: PageSnapshot | undefined;
         let screenshot: Buffer | undefined;
 
-        if (!noCache) {
-            const cached = (await Crawled.fromFirestoreQuery(Crawled.COLLECTION.where('urlPathDigest', '==', digest).orderBy('createdAt', 'desc').limit(1)))?.[0];
+        // if (!noCache) {
+        //     const cached = (
+        //         await Crawled.fromFirestoreQuery(
+        //             Crawled.COLLECTION.where('urlPathDigest', '==', digest).orderBy('createdAt', 'desc').limit(1)
+        //         )
+        //     )?.[0];
 
-            if (cached && cached.createdAt.valueOf() > (Date.now() - 1000 * 300)) {
-                const age = Date.now() - cached.createdAt.valueOf();
-                this.logger.info(`Cache hit for ${url}, normalized digest: ${digest}, ${age}ms old`, { url, digest, age });
-                snapshot = {
-                    ...cached.snapshot
-                };
-                if (snapshot) {
-                    delete snapshot.screenshot;
-                }
+        //     if (cached && cached.createdAt.valueOf() > Date.now() - 1000 * 300) {
+        //         const age = Date.now() - cached.createdAt.valueOf();
+        //         // this.logger.info(`Cache hit for ${url}, normalized digest: ${digest}, ${age}ms old`, {
+        //         //     url,
+        //         //     digest,
+        //         //     age,
+        //         // });
+        //         snapshot = {
+        //             ...cached.snapshot,
+        //         };
+        //         if (snapshot) {
+        //             delete snapshot.screenshot;
+        //         }
 
-                screenshot = cached.snapshot?.screenshot ? Buffer.from(cached.snapshot.screenshot, 'base64') : undefined;
-                yield {
-                    ...cached.snapshot,
-                    screenshot: cached.snapshot?.screenshot ? Buffer.from(cached.snapshot.screenshot, 'base64') : undefined
-                };
+        //         screenshot = cached.snapshot?.screenshot
+        //             ? Buffer.from(cached.snapshot.screenshot, 'base64')
+        //             : undefined;
+        //         yield {
+        //             ...cached.snapshot,
+        //             screenshot: cached.snapshot?.screenshot
+        //                 ? Buffer.from(cached.snapshot.screenshot, 'base64')
+        //                 : undefined,
+        //         };
 
-                return;
-            }
-        }
+        //         return;
+        //     }
+        // }
 
         const page = await this.pagePool.acquire();
         let nextSnapshotDeferred = Defer();
@@ -210,14 +228,18 @@ function giveSnapshot() {
         };
         page.on('snapshot', hdl);
 
-        const gotoPromise = page.goto(url, { waitUntil: ['load', 'domcontentloaded', 'networkidle0'], timeout: 30_000 })
+        const gotoPromise = page
+            .goto(url, { waitUntil: ['load', 'domcontentloaded', 'networkidle0'], timeout: 30_000 })
             .catch((err) => {
-                this.logger.warn(`Browsing of ${url} did not fully succeed`, { err: marshalErrorLike(err) });
-                return Promise.reject(new AssertionFailureError({
-                    message: `Failed to goto ${url}: ${err}`,
-                    cause: err,
-                }));
-            }).finally(async () => {
+                // this.logger.warn(`Browsing of ${url} did not fully succeed`, { err: marshalErrorLike(err) });
+                return Promise.reject(
+                    new AssertionFailureError({
+                        message: `Failed to goto ${url}: ${err}`,
+                        cause: err,
+                    })
+                );
+            })
+            .finally(async () => {
                 finalized = true;
                 if (!snapshot?.html) {
                     return;
@@ -226,20 +248,25 @@ function giveSnapshot() {
                     type: 'jpeg',
                     quality: 85,
                 });
-                snapshot = await page.evaluate('giveSnapshot()') as PageSnapshot;
-                this.logger.info(`Snapshot of ${url} done`, { url, digest, title: snapshot?.title, href: snapshot?.href });
-                const nowDate = new Date();
-                Crawled.save(
-                    Crawled.from({
-                        url,
-                        createdAt: nowDate,
-                        expireAt: new Date(nowDate.valueOf() + 1000 * 3600 * 24 * 7),
-                        urlPathDigest: digest,
-                        snapshot: { ...snapshot, screenshot: screenshot?.toString('base64') || '' },
-                    }).degradeForFireStore()
-                ).catch((err) => {
-                    this.logger.warn(`Failed to save snapshot`, { err: marshalErrorLike(err) });
-                });
+                snapshot = (await page.evaluate('giveSnapshot()')) as PageSnapshot;
+                // this.logger.info(`Snapshot of ${url} done`, {
+                //     url,
+                //     digest,
+                //     title: snapshot?.title,
+                //     href: snapshot?.href,
+                // });
+                // const nowDate = new Date();
+                // Crawled.save(
+                //     Crawled.from({
+                //         url,
+                //         createdAt: nowDate,
+                //         expireAt: new Date(nowDate.valueOf() + 1000 * 3600 * 24 * 7),
+                //         urlPathDigest: digest,
+                //         snapshot: { ...snapshot, screenshot: screenshot?.toString('base64') || '' },
+                //     }).degradeForFireStore()
+                // ).catch((err: any) => {
+                //     // this.logger.warn(`Failed to save snapshot`, { err: marshalErrorLike(err) });
+                // });
             });
 
         try {
@@ -255,7 +282,7 @@ function giveSnapshot() {
             gotoPromise.finally(() => {
                 page.off('snapshot', hdl);
                 this.pagePool.destroy(page).catch((err) => {
-                    this.logger.warn(`Failed to destroy page`, { err: marshalErrorLike(err) });
+                    // this.logger.warn(`Failed to destroy page`, { err: marshalErrorLike(err) });
                 });
             });
         }

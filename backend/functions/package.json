@@ -22,7 +22,7 @@
     "gcp-build": "node node_modules/puppeteer/install.mjs"
   },
   "engines": {
-    "node": "20"
+    "node": "18"
   },
   "main": "build/index.js",
   "dependencies": {
