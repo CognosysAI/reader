@@ -1,8 +1,6 @@
 // crawler.ts
 import { singleton } from 'tsyringe';
-import { RPCReflection } from 'civkit';
 import { PageSnapshot, PuppeteerControl } from '../services/puppeteer';
-import { Request, Response } from 'express';
 import normalizeUrl from '@esm2cjs/normalize-url';
 
 @singleton()

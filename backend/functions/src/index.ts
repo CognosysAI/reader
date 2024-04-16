@@ -10,7 +10,7 @@ import { PuppeteerControl } from './services/puppeteer';
 const puppeteerControl = new PuppeteerControl();
 const crawlerHost = new CrawlerHost(puppeteerControl);
 
-export const crawl = functions.runWith({ memory: '4GB', timeoutSeconds: 600 }).https.onRequest(async (req, res) => {
+export const crawl = functions.runWith({ memory: '4GB', timeoutSeconds: 540 }).https.onRequest(async (req, res) => {
     try {
         const url = req.query.url as string;
         if (!url) {
