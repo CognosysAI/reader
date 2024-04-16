@@ -9,17 +9,10 @@ import normalizeUrl from '@esm2cjs/normalize-url';
 export class CrawlerHost {
     constructor(protected puppeteerControl: PuppeteerControl) {}
 
-    async crawl(
-        rpcReflect: RPCReflection,
-        ctx: {
-            req: Request;
-            res: Response;
-        }
-    ) {
-        const noSlashURL = ctx.req.url.slice(1);
+    async crawl(url: string) {
         let urlToCrawl;
         try {
-            urlToCrawl = new URL(normalizeUrl(noSlashURL.trim()));
+            urlToCrawl = new URL(normalizeUrl(url.trim()));
         } catch (err) {
             throw new Error(`Invalid URL: ${err}`);
         }

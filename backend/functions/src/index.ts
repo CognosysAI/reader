@@ -1,30 +1,32 @@
+// index.ts
 import 'reflect-metadata';
 import { initializeApp } from 'firebase-admin/app';
+import * as functions from 'firebase-functions';
 initializeApp();
 
-import { loadModulesDynamically } from './helpers/loader';
-import { registry } from './helpers/registry';
-import path from 'path';
-import { ApplicationError } from 'civkit';
-loadModulesDynamically(path.resolve(__dirname, 'cloud-functions'));
+import { CrawlerHost } from './cloud-functions/crawler';
+import { PuppeteerControl } from './services/puppeteer';
 
-Object.assign(exports, registry.exportAll());
-Object.assign(
-    exports,
-    registry.exportGrouped({
-        memory: '4GiB',
-        timeoutSeconds: 540,
-    })
-);
-// registry.title = 'reader';
-// registry.version = '0.1.0';
+const puppeteerControl = new PuppeteerControl();
+const crawlerHost = new CrawlerHost(puppeteerControl);
+
+export const crawl = functions.https.onRequest(async (req, res) => {
+    try {
+        const url = req.query.url as string;
+        if (!url) {
+            res.status(400).send('Missing URL parameter');
+            return;
+        }
+
+        const result = await crawlerHost.crawl(url);
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Crawl Error:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
 
 process.on('unhandledRejection', (err) => {
-    // Walk around Firebase runtime bug.
-    if (err instanceof ApplicationError) {
-        // Application error shall not crash the process;
-        return;
-    }
-
-    throw err;
+    console.error('Unhandled Rejection:', err);
+    process.exit(1);
 });
