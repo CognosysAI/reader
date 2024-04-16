@@ -65,7 +65,7 @@ export class CrawlerHost {
                 continue;
             }
             const formatted = this.formatSnapshot(scrapped);
-            return formatted.toString();
+            return formatted;
         }
 
         if (!lastScrapped) {
