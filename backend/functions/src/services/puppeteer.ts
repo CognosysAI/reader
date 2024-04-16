@@ -1,4 +1,4 @@
-import { AssertionFailureError, AsyncService, Defer } from 'civkit';
+import { AsyncService } from 'civkit';
 import { container, singleton } from 'tsyringe';
 import type { Browser } from 'puppeteer';
 import genericPool from 'generic-pool';
@@ -169,121 +169,138 @@ function giveSnapshot() {
         return page;
     }
 
-    async *scrap(url: string, noCache: string | boolean = false): AsyncGenerator<PageSnapshot | undefined> {
-        const parsedUrl = new URL(url);
-        // parsedUrl.search = '';
-        parsedUrl.hash = '';
-        // const normalizedUrl = parsedUrl.toString().toLowerCase();
-        // const digest = md5Hasher.hash(normalizedUrl);
-        // this.logger.info(`Scraping ${url}, normalized digest: ${digest}`, { url, digest });
+    // async *scrap(url: string, noCache: string | boolean = false): AsyncGenerator<PageSnapshot | undefined> {
+    //     const parsedUrl = new URL(url);
+    //     // parsedUrl.search = '';
+    //     parsedUrl.hash = '';
+    //     // const normalizedUrl = parsedUrl.toString().toLowerCase();
+    //     // const digest = md5Hasher.hash(normalizedUrl);
+    //     // this.logger.info(`Scraping ${url}, normalized digest: ${digest}`, { url, digest });
 
-        let snapshot: PageSnapshot | undefined;
-        let screenshot: Buffer | undefined;
+    //     let snapshot: PageSnapshot | undefined;
+    //     let screenshot: Buffer | undefined;
 
-        // if (!noCache) {
-        //     const cached = (
-        //         await Crawled.fromFirestoreQuery(
-        //             Crawled.COLLECTION.where('urlPathDigest', '==', digest).orderBy('createdAt', 'desc').limit(1)
-        //         )
-        //     )?.[0];
+    //     // if (!noCache) {
+    //     //     const cached = (
+    //     //         await Crawled.fromFirestoreQuery(
+    //     //             Crawled.COLLECTION.where('urlPathDigest', '==', digest).orderBy('createdAt', 'desc').limit(1)
+    //     //         )
+    //     //     )?.[0];
 
-        //     if (cached && cached.createdAt.valueOf() > Date.now() - 1000 * 300) {
-        //         const age = Date.now() - cached.createdAt.valueOf();
-        //         // this.logger.info(`Cache hit for ${url}, normalized digest: ${digest}, ${age}ms old`, {
-        //         //     url,
-        //         //     digest,
-        //         //     age,
-        //         // });
-        //         snapshot = {
-        //             ...cached.snapshot,
-        //         };
-        //         if (snapshot) {
-        //             delete snapshot.screenshot;
-        //         }
+    //     //     if (cached && cached.createdAt.valueOf() > Date.now() - 1000 * 300) {
+    //     //         const age = Date.now() - cached.createdAt.valueOf();
+    //     //         // this.logger.info(`Cache hit for ${url}, normalized digest: ${digest}, ${age}ms old`, {
+    //     //         //     url,
+    //     //         //     digest,
+    //     //         //     age,
+    //     //         // });
+    //     //         snapshot = {
+    //     //             ...cached.snapshot,
+    //     //         };
+    //     //         if (snapshot) {
+    //     //             delete snapshot.screenshot;
+    //     //         }
 
-        //         screenshot = cached.snapshot?.screenshot
-        //             ? Buffer.from(cached.snapshot.screenshot, 'base64')
-        //             : undefined;
-        //         yield {
-        //             ...cached.snapshot,
-        //             screenshot: cached.snapshot?.screenshot
-        //                 ? Buffer.from(cached.snapshot.screenshot, 'base64')
-        //                 : undefined,
-        //         };
+    //     //         screenshot = cached.snapshot?.screenshot
+    //     //             ? Buffer.from(cached.snapshot.screenshot, 'base64')
+    //     //             : undefined;
+    //     //         yield {
+    //     //             ...cached.snapshot,
+    //     //             screenshot: cached.snapshot?.screenshot
+    //     //                 ? Buffer.from(cached.snapshot.screenshot, 'base64')
+    //     //                 : undefined,
+    //     //         };
 
-        //         return;
-        //     }
-        // }
+    //     //         return;
+    //     //     }
+    //     // }
 
+    //     const page = await this.pagePool.acquire();
+    //     let nextSnapshotDeferred = Defer();
+    //     let finalized = false;
+    //     const hdl = (s: any) => {
+    //         if (snapshot === s) {
+    //             return;
+    //         }
+    //         snapshot = s;
+    //         nextSnapshotDeferred.resolve(s);
+    //         nextSnapshotDeferred = Defer();
+    //     };
+    //     page.on('snapshot', hdl);
+
+    //     const gotoPromise = page
+    //         .goto(url, { waitUntil: ['load', 'domcontentloaded', 'networkidle0'], timeout: 30_000 })
+    //         .catch((err) => {
+    //             // this.logger.warn(`Browsing of ${url} did not fully succeed`, { err: marshalErrorLike(err) });
+    //             return Promise.reject(
+    //                 new AssertionFailureError({
+    //                     message: `Failed to goto ${url}: ${err}`,
+    //                     cause: err,
+    //                 })
+    //             );
+    //         })
+    //         .finally(async () => {
+    //             finalized = true;
+    //             if (!snapshot?.html) {
+    //                 return;
+    //             }
+    //             screenshot = await page.screenshot({
+    //                 type: 'jpeg',
+    //                 quality: 85,
+    //             });
+    //             snapshot = (await page.evaluate('giveSnapshot()')) as PageSnapshot;
+    //             // this.logger.info(`Snapshot of ${url} done`, {
+    //             //     url,
+    //             //     digest,
+    //             //     title: snapshot?.title,
+    //             //     href: snapshot?.href,
+    //             // });
+    //             // const nowDate = new Date();
+    //             // Crawled.save(
+    //             //     Crawled.from({
+    //             //         url,
+    //             //         createdAt: nowDate,
+    //             //         expireAt: new Date(nowDate.valueOf() + 1000 * 3600 * 24 * 7),
+    //             //         urlPathDigest: digest,
+    //             //         snapshot: { ...snapshot, screenshot: screenshot?.toString('base64') || '' },
+    //             //     }).degradeForFireStore()
+    //             // ).catch((err: any) => {
+    //             //     // this.logger.warn(`Failed to save snapshot`, { err: marshalErrorLike(err) });
+    //             // });
+    //         });
+
+    //     try {
+    //         while (true) {
+    //             await Promise.race([nextSnapshotDeferred.promise, gotoPromise]);
+    //             if (finalized) {
+    //                 yield { ...snapshot, screenshot } as PageSnapshot;
+    //                 break;
+    //             }
+    //             yield snapshot;
+    //         }
+    //     } finally {
+    //         gotoPromise.finally(() => {
+    //             page.off('snapshot', hdl);
+    //             this.pagePool.destroy(page).catch((err) => {
+    //                 // this.logger.warn(`Failed to destroy page`, { err: marshalErrorLike(err) });
+    //             });
+    //         });
+    //     }
+    // }
+
+    async *scrap(url: string): AsyncGenerator<PageSnapshot | undefined> {
         const page = await this.pagePool.acquire();
-        let nextSnapshotDeferred = Defer();
-        let finalized = false;
-        const hdl = (s: any) => {
-            if (snapshot === s) {
-                return;
-            }
-            snapshot = s;
-            nextSnapshotDeferred.resolve(s);
-            nextSnapshotDeferred = Defer();
-        };
-        page.on('snapshot', hdl);
-
-        const gotoPromise = page
-            .goto(url, { waitUntil: ['load', 'domcontentloaded', 'networkidle0'], timeout: 30_000 })
-            .catch((err) => {
-                // this.logger.warn(`Browsing of ${url} did not fully succeed`, { err: marshalErrorLike(err) });
-                return Promise.reject(
-                    new AssertionFailureError({
-                        message: `Failed to goto ${url}: ${err}`,
-                        cause: err,
-                    })
-                );
-            })
-            .finally(async () => {
-                finalized = true;
-                if (!snapshot?.html) {
-                    return;
-                }
-                screenshot = await page.screenshot({
-                    type: 'jpeg',
-                    quality: 85,
-                });
-                snapshot = (await page.evaluate('giveSnapshot()')) as PageSnapshot;
-                // this.logger.info(`Snapshot of ${url} done`, {
-                //     url,
-                //     digest,
-                //     title: snapshot?.title,
-                //     href: snapshot?.href,
-                // });
-                // const nowDate = new Date();
-                // Crawled.save(
-                //     Crawled.from({
-                //         url,
-                //         createdAt: nowDate,
-                //         expireAt: new Date(nowDate.valueOf() + 1000 * 3600 * 24 * 7),
-                //         urlPathDigest: digest,
-                //         snapshot: { ...snapshot, screenshot: screenshot?.toString('base64') || '' },
-                //     }).degradeForFireStore()
-                // ).catch((err: any) => {
-                //     // this.logger.warn(`Failed to save snapshot`, { err: marshalErrorLike(err) });
-                // });
-            });
+        let snapshot: PageSnapshot | undefined;
 
         try {
-            while (true) {
-                await Promise.race([nextSnapshotDeferred.promise, gotoPromise]);
-                if (finalized) {
-                    yield { ...snapshot, screenshot } as PageSnapshot;
-                    break;
-                }
-                yield snapshot;
-            }
+            await page.goto(url, { waitUntil: ['load', 'networkidle0'], timeout: 30_000 });
+            snapshot = (await page.evaluate('giveSnapshot()')) as PageSnapshot;
+            yield snapshot;
+        } catch (err) {
+            throw new Error(`Failed to goto ${url}: ${err}`);
         } finally {
-            gotoPromise.finally(() => {
-                page.off('snapshot', hdl);
-                this.pagePool.destroy(page).catch((err) => {
-                    // this.logger.warn(`Failed to destroy page`, { err: marshalErrorLike(err) });
-                });
+            this.pagePool.destroy(page).catch((err) => {
+                // Handle the error appropriately
             });
         }
     }
